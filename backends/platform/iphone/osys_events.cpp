@@ -116,7 +116,7 @@ bool OSystem_IPHONE::handleEvent_mouseDown(Common::Event &event, int x, int y) {
 
     bool ret = false;
         
-    /*debug("mouse down");
+    debug("mouse down");
     debug("%d",_screenWidth);
     debug("%d",_screenHeight);
     debug("%d",x);
@@ -145,7 +145,7 @@ bool OSystem_IPHONE::handleEvent_mouseDown(Common::Event &event, int x, int y) {
     }
     
     debug("%d",x);
-    debug("%d",y);*/
+    debug("%d",y);
     
 	if (_touchpadModeEnabled) {
 		_lastPadX = x;
