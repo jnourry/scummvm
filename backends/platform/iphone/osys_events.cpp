@@ -115,6 +115,38 @@ bool OSystem_IPHONE::handleEvent_mouseDown(Common::Event &event, int x, int y) {
 	_secondaryTapped = false;
 
     bool ret = false;
+        
+    int screenWidth = iPhone_getScreenWidth();
+    int screenHeight = iPhone_getScreenHeight();
+	
+	debug("mouse down");
+    debug("%d",screenWidth);
+    debug("%d",screenHeight);
+    debug("%d",x);
+    debug("%d",y);
+
+    
+    if (!_touchpadModeEnabled && !_mouseClickAndDragEnabled) {
+        // snap the mouse to the screen edges if we're close enough to enable easy in game navigation
+        float testX = x;
+        float snapX = 0;
+        if (x > (screenWidth/2)) {
+            testX = screenWidth - x;
+            snapX = screenWidth;
+        }
+        float testY = y;
+        float snapY = 0;
+        if (y > (screenHeight/2)) {
+            y = screenHeight - y;
+            snapY = screenHeight;
+        }
+        
+        x = (testX / screenWidth < 0.015f) ? snapX : x;
+        y = (testY / screenHeight < 0.015f) ? snapY : y;
+    }
+    
+    debug("%d",x);
+    debug("%d",y);
     
 	if (_touchpadModeEnabled) {
 		_lastPadX = x;
