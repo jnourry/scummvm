@@ -49,11 +49,24 @@
 
 	UIDeviceOrientation _orientation;
 
+	GLint _renderBufferWidth;
+	GLint _renderBufferHeight;
+
 	GLfloat _gameScreenVertCoords[4 * 2];
 	GLfloat _gameScreenTexCoords[4 * 2];
+	CGRect _gameScreenRect;
 
 	GLfloat _overlayVertCoords[4 * 2];
 	GLfloat _overlayTexCoords[4 * 2];
+	CGRect _overlayRect;
+
+	GLfloat _mouseVertCoords[4 * 2];
+	GLfloat _mouseTexCoords[4 * 2];
+	GLint _mouseHotspotX, _mouseHotspotY;
+	GLint _mouseWidth, _mouseHeight;
+	GLfloat _mouseScaleX, _mouseScaleY;
+
+	int _scaledShakeOffsetY;
 }
 
 - (id)initWithFrame:(struct CGRect)frame;
@@ -73,6 +86,8 @@
 - (void)updateMouseSurface;
 - (void)clearColorBuffer;
 
+- (void)notifyMouseMove;
+- (void)updateMouseCursorScaling;
 - (void)updateMouseCursor;
 
 - (id)getEvent;

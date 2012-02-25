@@ -34,7 +34,6 @@
 #include "audio/audiostream.h"
 #include "audio/mixer.h"
 
-#include "engines/advancedDetector.h"
 #include "engines/engine.h"
 
 #include "dreamweb/console.h"
@@ -76,6 +75,7 @@ const unsigned int kSymbolx = 64;
 const unsigned int kSymboly = 56;
 const unsigned int kLengthofvars = 68;
 const unsigned int kFrameBlocksize = 2080;
+const unsigned int kGraphicsFileFrameSize = 347; // ceil(2080 / sizeof(Frame))
 const unsigned int kNumexobjects = 114;
 const unsigned int kNumExTexts = kNumexobjects + 2;
 const uint16 kExtextlen = 18000;
@@ -98,9 +98,7 @@ enum {
 	kDebugSaveLoad = (1 << 1)
 };
 
-struct DreamWebGameDescription {
-	ADGameDescription desc;
-};
+struct DreamWebGameDescription;
 
 class DreamWebEngine : public Engine {
 private:
@@ -144,15 +142,17 @@ public:
 
 	void quit();
 
-	void loadSounds(uint bank, const Common::String &file);
+	void loadSounds(uint bank, const Common::String &suffix);
 	bool loadSpeech(const Common::String &filename);
 
 	void enableSavingOrLoading(bool enable = true) { _enableSavingOrLoading = enable; }
 
-	Common::Language getLanguage() const { return _language; }
+	Common::Language getLanguage() const;
 	uint8 modifyChar(uint8 c) const;
 
 	void stopSound(uint8 channel);
+
+	const Common::String& getDatafilePrefix() { return _datafilePrefix; };
 
 private:
 	void keyPressed(uint16 ascii);
@@ -162,12 +162,12 @@ private:
 
 	const DreamWebGameDescription	*_gameDescription;
 	Common::RandomSource			_rnd;
+	Common::String _datafilePrefix;
 
 	uint _speed;
 	bool _turbo;
 	uint _oldMouseState;
 	bool _enableSavingOrLoading;
-	Common::Language _language;
 
 	struct Sample {
 		uint offset;
@@ -265,13 +265,28 @@ protected:
 	TextFile _puzzleText;
 	TextFile _commandText;
 
-	// graphics files
-	GraphicsFile _tempGraphics;
-	GraphicsFile _tempGraphics2;
-	GraphicsFile _tempGraphics3;
+	// local graphics files
+	GraphicsFile _keypadGraphics;
+	GraphicsFile _menuGraphics;
+	GraphicsFile _menuGraphics2;
+	GraphicsFile _folderGraphics;
+	GraphicsFile _folderGraphics2;
+	GraphicsFile _folderGraphics3;
+	GraphicsFile _folderCharset;
+	GraphicsFile _symbolGraphics;
+	GraphicsFile _diaryGraphics;
+	GraphicsFile _diaryCharset;
+	GraphicsFile _monitorGraphics;
+	GraphicsFile _monitorCharset;
+	GraphicsFile _newplaceGraphics;
+	GraphicsFile _newplaceGraphics2;
+	GraphicsFile _newplaceGraphics3;
+	GraphicsFile _cityGraphics;
+	GraphicsFile _saveGraphics;
+
+	// global graphics files
 	GraphicsFile _icons1;
 	GraphicsFile _icons2;
-	GraphicsFile _tempCharset;
 	GraphicsFile _charset1;
 	GraphicsFile _mainSprites;
 	const GraphicsFile *_currentCharset;
@@ -793,19 +808,15 @@ public:
 	const uint8 *getTextInFile1(uint16 index);
 	uint8 findNextColon(const uint8 **string);
 	void allocateBuffers();
-	void loadTextFile(TextFile &file, const char *fileName);
-	void loadGraphicsFile(GraphicsFile &file, const char *fileName);
+	void loadTextFile(TextFile &file, const char *suffix);
+	void loadGraphicsFile(GraphicsFile &file, const char *suffix);
 	void loadGraphicsSegment(GraphicsFile &file, Common::File &inFile, unsigned int len);
 	void loadTextSegment(TextFile &file, Common::File &inFile, unsigned int len);
-	void loadIntoTemp(const char *fileName);
-	void loadIntoTemp2(const char *fileName);
-	void loadIntoTemp3(const char *fileName);
-	void loadTempCharset(const char *fileName);
 	void loadTravelText();
-	void loadTempText(const char *fileName);
+	void loadTempText(const char *suffix);
 	void sortOutMap();
 	void loadRoomData(const Room &room, bool skipDat);
-	void useTempCharset();
+	void useTempCharset(GraphicsFile *charset);
 	void useCharset1();
 	void printMessage(uint16 x, uint16 y, uint8 index, uint8 maxWidth, bool centered);
 	void printMessage2(uint16 x, uint16 y, uint8 index, uint8 maxWidth, bool centered, uint8 count);
@@ -848,11 +859,7 @@ public:
 	bool isItWorn(const DynObject *object);
 	bool compare(uint8 index, uint8 flag, const char id[4]);
 	void hangOnW(uint16 frameCount);
-	void getRidOfTemp();
 	void getRidOfTempText();
-	void getRidOfTemp2();
-	void getRidOfTemp3();
-	void getRidOfTempCharset();
 	void getRidOfAll();
 	void placeSetObject(uint8 index);
 	void removeSetObject(uint8 index);
@@ -1129,7 +1136,7 @@ public:
 	void doShake();
 	void vSync();
 	void setMode();
-	void showPCX(const Common::String &name);
+	void showPCX(const Common::String &suffix);
 	void showFrameInternal(const uint8 *pSrc, uint16 x, uint16 y, uint8 effectsFlag, uint8 width, uint8 height);
 	void showFrame(const GraphicsFile &frameData, uint16 x, uint16 y, uint16 frameNumber, uint8 effectsFlag, uint8 *width, uint8 *height);
 	void showFrame(const GraphicsFile &frameData, uint16 x, uint16 y, uint16 frameNumber, uint8 effectsFlag);

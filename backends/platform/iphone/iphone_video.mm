@@ -20,33 +20,21 @@
  *
  */
 
+// Disable symbol overrides so that we can use system headers.
+#define FORBIDDEN_SYMBOL_ALLOW_ALL
+
 #include "iphone_video.h"
+
+#include "graphics/colormasks.h"
 
 iPhoneView *g_iPhoneViewInstance = nil;
 static int _fullWidth;
 static int _fullHeight;
-static CGRect _gameScreenRect;
-
-static char *_gameScreenTextureBuffer = 0;
-static int _gameScreenTextureWidth = 0;
-static int _gameScreenTextureHeight = 0;
-
-static char *_overlayTexBuffer = 0;
-static int _overlayTexWidth = 0;
-static int _overlayTexHeight = 0;
-static CGRect _overlayRect;
 
 static int _needsScreenUpdate = 0;
 
 static UITouch *_firstTouch = NULL;
 static UITouch *_secondTouch = NULL;
-
-static unsigned short *_mouseCursor = NULL;
-
-static GLint _renderBufferWidth;
-static GLint _renderBufferHeight;
-
-static int _scaledShakeOffsetY;
 
 #if 0
 static long lastTick = 0;
@@ -68,11 +56,6 @@ int printOglError(const char *file, int line) {
 	return retCode;
 }
 
-void iPhone_setMouseCursor(unsigned short *buffer) {
-	_mouseCursor = buffer;
-	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(updateMouseCursor) withObject:nil waitUntilDone: YES];
-}
-
 bool iPhone_isHighResDevice() {
 	return _fullHeight > 480;
 }
@@ -83,17 +66,6 @@ void iPhone_updateScreen() {
 		_needsScreenUpdate = 1;
 		[g_iPhoneViewInstance performSelectorOnMainThread:@selector(updateSurface) withObject:nil waitUntilDone: NO];
 	}
-}
-
-void iPhone_updateScreenRect(unsigned short *screen, int x1, int y1, int x2, int y2, int width) {
-	for (int y = y1; y < y2; ++y)
-		memcpy(&_gameScreenTextureBuffer[(y * _gameScreenTextureWidth + x1) * 2], &screen[y * width + x1], (x2 - x1) * 2);
-}
-
-void iPhone_updateOverlayRect(unsigned short *screen, int x1, int y1, int x2, int y2, int width) {
-	//printf("Overlaywidth: %u, fullwidth %u\n", _videoContext.overlayWidth, _fullWidth);
-	for (int y = y1; y < y2; ++y)
-		memcpy(&_overlayTexBuffer[(y * _overlayTexWidth + x1) * 2], &screen[y * width + x1], (x2 - x1) * 2);
 }
 
 bool iPhone_fetchEvent(int *outEvent, int *outX, int *outY) {
@@ -181,18 +153,16 @@ const char *iPhone_getDocumentsDir() {
 
 		_videoContext.overlayHeight = _renderBufferWidth;
 		_videoContext.overlayWidth = _renderBufferHeight;
-		_overlayTexWidth = getSizeNextPOT(_videoContext.overlayHeight);
-		_overlayTexHeight = getSizeNextPOT(_videoContext.overlayWidth);
+		uint overlayTextureWidth = getSizeNextPOT(_videoContext.overlayHeight);
+		uint overlayTextureHeight = getSizeNextPOT(_videoContext.overlayWidth);
 
 		// Since the overlay size won't change the whole run, we can
 		// precalculate the texture coordinates for the overlay texture here
 		// and just use it later on.
-		_overlayTexCoords[2] = _overlayTexCoords[6] = _videoContext.overlayWidth / (GLfloat)_overlayTexWidth;
-		_overlayTexCoords[5] = _overlayTexCoords[7] = _videoContext.overlayHeight / (GLfloat)_overlayTexHeight;
+		_overlayTexCoords[2] = _overlayTexCoords[6] = _videoContext.overlayWidth / (GLfloat)overlayTextureWidth;
+		_overlayTexCoords[5] = _overlayTexCoords[7] = _videoContext.overlayHeight / (GLfloat)overlayTextureHeight;
 
-		int textureSize = _overlayTexWidth * _overlayTexHeight * 2;
-		_overlayTexBuffer = (char *)malloc(textureSize);
-		memset(_overlayTexBuffer, 0, textureSize);
+		_videoContext.overlayTexture.create(overlayTextureWidth, overlayTextureHeight, Graphics::createPixelFormat<5551>());
 
 		glViewport(0, 0, _renderBufferWidth, _renderBufferHeight); printOpenGLError();
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f); printOpenGLError();
@@ -225,9 +195,7 @@ const char *iPhone_getDocumentsDir() {
 	_overlayTexture = 0;
 	_mouseCursorTexture = 0;
 
-	memset(&_videoContext, 0, sizeof(_videoContext));
-	_videoContext.graphicsMode = kGraphicsModeLinear;
-	_videoContext.overlayVisible = false;
+	_scaledShakeOffsetY = 0;
 
 	_gameScreenVertCoords[0] = _gameScreenVertCoords[1] =
 	    _gameScreenVertCoords[2] = _gameScreenVertCoords[3] =
@@ -249,6 +217,16 @@ const char *iPhone_getDocumentsDir() {
 	    _overlayTexCoords[4] = _overlayTexCoords[5] =
 	    _overlayTexCoords[6] = _overlayTexCoords[7] = 0;
 
+	_mouseVertCoords[0] = _mouseVertCoords[1] =
+	    _mouseVertCoords[2] = _mouseVertCoords[3] =
+	    _mouseVertCoords[4] = _mouseVertCoords[5] =
+	    _mouseVertCoords[6] = _mouseVertCoords[7] = 0;
+
+	_mouseTexCoords[0] = _mouseTexCoords[1] =
+	    _mouseTexCoords[2] = _mouseTexCoords[3] =
+	    _mouseTexCoords[4] = _mouseTexCoords[5] =
+	    _mouseTexCoords[6] = _mouseTexCoords[7] = 0;
+
 	// Initialize the OpenGL ES context
 	[self createContext];
 
@@ -262,8 +240,9 @@ const char *iPhone_getDocumentsDir() {
 		[_keyboardView dealloc];
 	}
 
-	free(_gameScreenTextureBuffer);
-	free(_overlayTexBuffer);
+	_videoContext.screenTexture.free();
+	_videoContext.overlayTexture.free();
+	_videoContext.mouseTexture.free();
 }
 
 - (void)drawRect:(CGRect)frame {
@@ -330,51 +309,17 @@ const char *iPhone_getDocumentsDir() {
 
 }
 
-- (void)updateMouseCursor {
-	if (_mouseCursorTexture == 0) {
-		glGenTextures(1, &_mouseCursorTexture); printOpenGLError();
-		[self setFilterModeForTexture:_mouseCursorTexture];
-	}
+- (void)notifyMouseMove {
+	const GLint mouseX = (GLint)(_videoContext.mouseX * _mouseScaleX) - _mouseHotspotX;
+	const GLint mouseY = (GLint)(_videoContext.mouseY * _mouseScaleY) - _mouseHotspotY;
 
-	glBindTexture(GL_TEXTURE_2D, _mouseCursorTexture); printOpenGLError();
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getSizeNextPOT(_videoContext.mouseWidth), getSizeNextPOT(_videoContext.mouseHeight), 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, _mouseCursor); printOpenGLError();
-
-	free(_mouseCursor);
-	_mouseCursor = NULL;
+	_mouseVertCoords[0] = _mouseVertCoords[4] = mouseX;
+	_mouseVertCoords[1] = _mouseVertCoords[3] = mouseY;
+	_mouseVertCoords[2] = _mouseVertCoords[6] = mouseX + _mouseWidth;
+	_mouseVertCoords[5] = _mouseVertCoords[7] = mouseY + _mouseHeight;
 }
 
-- (void)updateMainSurface {
-	glVertexPointer(2, GL_FLOAT, 0, _gameScreenVertCoords); printOpenGLError();
-	glTexCoordPointer(2, GL_FLOAT, 0, _gameScreenTexCoords); printOpenGLError();
-
-	glBindTexture(GL_TEXTURE_2D, _screenTexture); printOpenGLError();
-
-	// Unfortunately we have to update the whole texture every frame, since glTexSubImage2D is actually slower in all cases
-	// due to the iPhone internals having to convert the whole texture back from its internal format when used.
-	// In the future we could use several tiled textures instead.
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, _gameScreenTextureWidth, _gameScreenTextureHeight, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, _gameScreenTextureBuffer); printOpenGLError();
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); printOpenGLError();
-}
-
-- (void)updateOverlaySurface {
-	glVertexPointer(2, GL_FLOAT, 0, _overlayVertCoords); printOpenGLError();
-	glTexCoordPointer(2, GL_FLOAT, 0, _overlayTexCoords); printOpenGLError();
-
-	glBindTexture(GL_TEXTURE_2D, _overlayTexture); printOpenGLError();
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, _overlayTexWidth, _overlayTexHeight, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, _overlayTexBuffer); printOpenGLError();
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); printOpenGLError();
-}
-
-- (void)updateMouseSurface {
-	int width = _videoContext.mouseWidth;
-	int height = _videoContext.mouseHeight;
-
-	int mouseX = _videoContext.mouseX;
-	int mouseY = _videoContext.mouseY;
-
-	int hotspotX = _videoContext.mouseHotspotX;
-	int hotspotY = _videoContext.mouseHotspotY;
-
+- (void)updateMouseCursorScaling {
 	CGRect *rect;
 	int maxWidth, maxHeight;
 
@@ -388,51 +333,73 @@ const char *iPhone_getDocumentsDir() {
 		maxHeight = _videoContext.overlayHeight;
 	}
 
-	const GLfloat scaleX = CGRectGetWidth(*rect) / (GLfloat)maxWidth;
-	const GLfloat scaleY = CGRectGetHeight(*rect) / (GLfloat)maxHeight;
+	if (!maxWidth || !maxHeight) {
+		printf("WARNING: updateMouseCursorScaling called when screen was not ready (%d)!\n", _videoContext.overlayVisible);
+		return;
+	}
 
-	mouseX = (int)(mouseX * scaleX);
-	mouseY = (int)(mouseY * scaleY);
-	hotspotX = (int)(hotspotX * scaleX);
-	hotspotY = (int)(hotspotY * scaleY);
-	width = (int)(width * scaleX);
-	height = (int)(height * scaleY);
+	_mouseScaleX = CGRectGetWidth(*rect) / (GLfloat)maxWidth;
+	_mouseScaleY = CGRectGetHeight(*rect) / (GLfloat)maxHeight;
 
-	mouseX -= hotspotX;
-	mouseY -= hotspotY;
+	_mouseWidth = (GLint)(_videoContext.mouseWidth * _mouseScaleX);
+	_mouseHeight = (GLint)(_videoContext.mouseHeight * _mouseScaleY);
 
-	mouseX += (int)CGRectGetMinX(*rect);
-	mouseY += (int)CGRectGetMinY(*rect);
+	_mouseHotspotX = (GLint)(_videoContext.mouseHotspotX * _mouseScaleX);
+	_mouseHotspotY = (GLint)(_videoContext.mouseHotspotY * _mouseScaleY);
 
-	GLfloat vertices[] = {
-		// Top left
-		mouseX        , mouseY,
-		// Top right
-		mouseX + width, mouseY,
-		// Bottom left
-		mouseX        , mouseY + height,
-		// Bottom right
-		mouseX + width, mouseY + height
-	};
+	// We subtract the screen offset to the hotspot here to simplify the
+	// screen offset handling in the mouse code. Note the subtraction here
+	// makes sure that the offset actually gets added to the mouse position,
+	// since the hotspot offset is substracted from the position.
+	_mouseHotspotX -= (GLint)CGRectGetMinX(*rect);
+	_mouseHotspotY -= (GLint)CGRectGetMinY(*rect);
 
-	//printf("Cursor: width %u height %u\n", _videoContext.mouseWidth, _videoContext.mouseHeight);
+	// FIXME: For now we also adapt the mouse position here. In reality we
+	// would be better off to also adjust the event position when switching
+	// from overlay to game screen or vica versa.
+	[self notifyMouseMove];
+}
 
-	float texWidth = _videoContext.mouseWidth / (float)getSizeNextPOT(_videoContext.mouseWidth);
-	float texHeight = _videoContext.mouseHeight / (float)getSizeNextPOT(_videoContext.mouseHeight);
+- (void)updateMouseCursor {
+	if (_mouseCursorTexture == 0) {
+		glGenTextures(1, &_mouseCursorTexture); printOpenGLError();
+		[self setFilterModeForTexture:_mouseCursorTexture];
+	}
 
-	const GLfloat texCoords[] = {
-		// Top left
-		0       , 0,
-		// Top right
-		texWidth, 0,
-		// Bottom left
-		0       , texHeight,
-		// Bottom right
-		texWidth, texHeight
-	};
+	[self updateMouseCursorScaling];
 
-	glVertexPointer(2, GL_FLOAT, 0, vertices); printOpenGLError();
-	glTexCoordPointer(2, GL_FLOAT, 0, texCoords); printOpenGLError();
+	_mouseTexCoords[2] = _mouseTexCoords[6] = _videoContext.mouseWidth / (GLfloat)_videoContext.mouseTexture.w;
+	_mouseTexCoords[5] = _mouseTexCoords[7] = _videoContext.mouseHeight / (GLfloat)_videoContext.mouseTexture.h;
+
+	glBindTexture(GL_TEXTURE_2D, _mouseCursorTexture); printOpenGLError();
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, _videoContext.mouseTexture.w, _videoContext.mouseTexture.h, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, _videoContext.mouseTexture.pixels); printOpenGLError();
+}
+
+- (void)updateMainSurface {
+	glVertexPointer(2, GL_FLOAT, 0, _gameScreenVertCoords); printOpenGLError();
+	glTexCoordPointer(2, GL_FLOAT, 0, _gameScreenTexCoords); printOpenGLError();
+
+	glBindTexture(GL_TEXTURE_2D, _screenTexture); printOpenGLError();
+
+	// Unfortunately we have to update the whole texture every frame, since glTexSubImage2D is actually slower in all cases
+	// due to the iPhone internals having to convert the whole texture back from its internal format when used.
+	// In the future we could use several tiled textures instead.
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, _videoContext.screenTexture.w, _videoContext.screenTexture.h, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, _videoContext.screenTexture.pixels); printOpenGLError();
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); printOpenGLError();
+}
+
+- (void)updateOverlaySurface {
+	glVertexPointer(2, GL_FLOAT, 0, _overlayVertCoords); printOpenGLError();
+	glTexCoordPointer(2, GL_FLOAT, 0, _overlayTexCoords); printOpenGLError();
+
+	glBindTexture(GL_TEXTURE_2D, _overlayTexture); printOpenGLError();
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, _videoContext.overlayTexture.w, _videoContext.overlayTexture.h, 0, GL_RGBA, GL_UNSIGNED_SHORT_5_5_5_1, _videoContext.overlayTexture.pixels); printOpenGLError();
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); printOpenGLError();
+}
+
+- (void)updateMouseSurface {
+	glVertexPointer(2, GL_FLOAT, 0, _mouseVertCoords); printOpenGLError();
+	glTexCoordPointer(2, GL_FLOAT, 0, _mouseTexCoords); printOpenGLError();
 
 	glBindTexture(GL_TEXTURE_2D, _mouseCursorTexture); printOpenGLError();
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); printOpenGLError();
@@ -477,16 +444,14 @@ const char *iPhone_getDocumentsDir() {
 }
 
 - (void)initSurface {
-	_gameScreenTextureWidth = getSizeNextPOT(_videoContext.screenWidth);
-	_gameScreenTextureHeight = getSizeNextPOT(_videoContext.screenHeight);
+	uint screenTexWidth = getSizeNextPOT(_videoContext.screenWidth);
+	uint screenTexHeight = getSizeNextPOT(_videoContext.screenHeight);
 
-	_gameScreenTexCoords[2] = _gameScreenTexCoords[6] = _videoContext.screenWidth / (GLfloat)_gameScreenTextureWidth;
-	_gameScreenTexCoords[5] = _gameScreenTexCoords[7] = _videoContext.screenHeight / (GLfloat)_gameScreenTextureHeight;
+	_gameScreenTexCoords[2] = _gameScreenTexCoords[6] = _videoContext.screenWidth / (GLfloat)screenTexWidth;
+	_gameScreenTexCoords[5] = _gameScreenTexCoords[7] = _videoContext.screenHeight / (GLfloat)screenTexHeight;
 
 	int screenWidth, screenHeight;
 	[self setUpOrientation:_orientation width:&screenWidth height:&screenHeight];
-
-	//printf("Window: (%d, %d), Surface: (%d, %d), Texture(%d, %d)\n", _fullWidth, _fullHeight, _videoContext.screenWidth, _videoContext.screenHeight, _gameScreenTextureWidth, _gameScreenTextureHeight);
 
 	if (_screenTexture > 0) {
 		glDeleteTextures(1, &_screenTexture); printOpenGLError();
@@ -502,10 +467,7 @@ const char *iPhone_getDocumentsDir() {
 	glGenTextures(1, &_overlayTexture); printOpenGLError();
 	[self setFilterModeForTexture:_overlayTexture];
 
-	free(_gameScreenTextureBuffer);
-	int textureSize = _gameScreenTextureWidth * _gameScreenTextureHeight * 2;
-	_gameScreenTextureBuffer = (char *)malloc(textureSize);
-	memset(_gameScreenTextureBuffer, 0, textureSize);
+	_videoContext.screenTexture.create(screenTexWidth, screenTexHeight, Graphics::createPixelFormat<565>());
 
 	glBindRenderbufferOES(GL_RENDERBUFFER_OES, _viewRenderbuffer); printOpenGLError();
 
@@ -516,10 +478,19 @@ const char *iPhone_getDocumentsDir() {
 		[[_keyboardView inputView] removeFromSuperview];
 	}
 
+	GLfloat adjustedWidth = _videoContext.screenWidth;
+	GLfloat adjustedHeight = _videoContext.screenHeight;
+	if (_videoContext.asprectRatioCorrection) {
+		if (_videoContext.screenWidth == 320 && _videoContext.screenHeight == 200)
+			adjustedHeight = 240;
+		else if (_videoContext.screenWidth == 640 && _videoContext.screenHeight == 400)
+			adjustedHeight = 480;
+	}
+	
 	float overlayPortraitRatio;
 
 	if (_orientation == UIDeviceOrientationLandscapeLeft || _orientation ==  UIDeviceOrientationLandscapeRight) {
-		GLfloat gameScreenRatio = (GLfloat)_videoContext.screenWidth / (GLfloat)_videoContext.screenHeight;
+		GLfloat gameScreenRatio = adjustedWidth / adjustedHeight;
 		GLfloat screenRatio = (GLfloat)screenWidth / (GLfloat)screenHeight;
 
 		// These are the width/height according to the portrait layout!
@@ -548,7 +519,7 @@ const char *iPhone_getDocumentsDir() {
 		_gameScreenRect = CGRectMake(xOffset, yOffset, rectWidth, rectHeight);
 		overlayPortraitRatio = 1.0f;
 	} else {
-		float ratio = (float)_videoContext.screenHeight / (float)_videoContext.screenWidth;
+		GLfloat ratio = adjustedHeight / adjustedWidth;
 		int height = (int)(screenWidth * ratio);
 		//printf("Making rect (%u, %u)\n", screenWidth, height);
 		_gameScreenRect = CGRectMake(0, 0, screenWidth, height);
@@ -576,6 +547,7 @@ const char *iPhone_getDocumentsDir() {
 	_overlayVertCoords[5] = _overlayVertCoords[7] = CGRectGetMaxY(_overlayRect);
 
 	[self setViewTransformation];
+	[self updateMouseCursorScaling];
 }
 
 - (void)setViewTransformation {
@@ -672,7 +644,7 @@ const char *iPhone_getDocumentsDir() {
 	*y = (int)(point.y * height + offsetY);
 
 	// Clip coordinates
-	if (*x < 0 || *x > CGRectGetWidth(*area) || *y < 0 || *y > CGRectGetHeight(*area))
+	if (*x < 0 || *x > width || *y < 0 || *y > height)
 		return false;
 
 	return true;

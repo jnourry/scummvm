@@ -23,6 +23,8 @@
 #ifndef BACKENDS_PLATFORM_IPHONE_IPHONE_COMMON_H
 #define BACKENDS_PLATFORM_IPHONE_IPHONE_COMMON_H
 
+#include "graphics/surface.h"
+
 enum InputEvent {
 	kInputMouseDown,
 	kInputMouseUp,
@@ -56,18 +58,28 @@ enum GraphicsModes {
 };
 
 struct VideoContext {
+	VideoContext() : asprectRatioCorrection(), screenWidth(), screenHeight(), overlayVisible(false),
+	                 overlayWidth(), overlayHeight(), mouseX(), mouseY(),
+	                 mouseHotspotX(), mouseHotspotY(), mouseWidth(), mouseHeight(),
+	                 mouseIsVisible(), graphicsMode(kGraphicsModeLinear), shakeOffsetY() {
+	}
+
 	// Game screen state
+	bool asprectRatioCorrection;
 	uint screenWidth, screenHeight;
+	Graphics::Surface screenTexture;
 
 	// Overlay state
 	bool overlayVisible;
 	uint overlayWidth, overlayHeight;
+	Graphics::Surface overlayTexture;
 
 	// Mouse cursor state
 	uint mouseX, mouseY;
 	int mouseHotspotX, mouseHotspotY;
 	uint mouseWidth, mouseHeight;
 	bool mouseIsVisible;
+	Graphics::Surface mouseTexture;
 
 	// Misc state
 	GraphicsModes graphicsMode;
@@ -76,12 +88,9 @@ struct VideoContext {
 
 // On the ObjC side
 void iPhone_updateScreen();
-void iPhone_updateScreenRect(unsigned short *screen, int x1, int y1, int x2, int y2, int width);
-void iPhone_updateOverlayRect(unsigned short *screen, int x1, int y1, int x2, int y2, int width);
 bool iPhone_fetchEvent(int *outEvent, int *outX, int *outY);
 const char *iPhone_getDocumentsDir();
 bool iPhone_isHighResDevice();
-void iPhone_setMouseCursor(unsigned short *buffer);
 
 uint getSizeNextPOT(uint size);
 

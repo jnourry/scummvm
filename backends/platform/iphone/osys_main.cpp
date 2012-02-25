@@ -55,13 +55,13 @@ SoundProc OSystem_IPHONE::s_soundCallback = NULL;
 void *OSystem_IPHONE::s_soundParam = NULL;
 
 OSystem_IPHONE::OSystem_IPHONE() :
-	_mixer(NULL), _gameScreenRaw(NULL), _gameScreenConverted(NULL),
+	_mixer(NULL), _gameScreenRaw(NULL),
 	_mouseBuf(NULL), _lastMouseTap(0), _queuedEventTime(0),
 	_mouseNeedTextureUpdate(false), _secondaryTapped(false), _lastSecondaryTap(0),
 	_screenOrientation(kScreenOrientationFlippedLandscape), _mouseClickAndDragEnabled(false),
 	_gestureStartX(-1), _gestureStartY(-1), _fullScreenIsDirty(false), _fullScreenOverlayIsDirty(false),
 	_mouseDirty(false), _timeSuspended(0), _lastDragPosX(-1), _lastDragPosY(-1), _screenChangeCount(0),
-	_overlayBuffer(0), _mouseCursorPaletteEnabled(false) {
+	_mouseCursorPaletteEnabled(false) {
 	_queuedInputEvent.type = Common::EVENT_INVALID;
 	_touchpadModeEnabled = !iPhone_isHighResDevice();
 	_fsFactory = new POSIXFilesystemFactory();
@@ -73,7 +73,6 @@ OSystem_IPHONE::~OSystem_IPHONE() {
 
 	delete _mixer;
 	free(_gameScreenRaw);
-	free(_gameScreenConverted);
 }
 
 int OSystem_IPHONE::timerHandler(int t) {
@@ -119,6 +118,9 @@ void OSystem_IPHONE::setFeatureState(Feature f, bool enable) {
 			_mouseCursorPaletteEnabled = enable;
 		}
 		break;
+	case kFeatureAspectRatioCorrection:
+		_videoContext->asprectRatioCorrection = enable;
+		break;
 
 	default:
 		break;
@@ -129,6 +131,8 @@ bool OSystem_IPHONE::getFeatureState(Feature f) {
 	switch (f) {
 	case kFeatureCursorPalette:
 		return _mouseCursorPaletteEnabled;
+	case kFeatureAspectRatioCorrection:
+		return _videoContext->asprectRatioCorrection;
 
 	default:
 		return false;

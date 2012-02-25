@@ -68,22 +68,7 @@ void OSystem_IPHONE::initSize(uint width, uint height, const Graphics::PixelForm
 	_gameScreenRaw = (byte *)malloc(width * height);
 	bzero(_gameScreenRaw, width * height);
 
-	//free(_overlayBuffer);
-
-	int fullSize = _videoContext->screenWidth * _videoContext->screenHeight * sizeof(OverlayColor);
-	//_overlayBuffer = (OverlayColor *)malloc(fullSize);
-
-	free(_gameScreenConverted);
-
-	_gameScreenConverted = (uint16 *)malloc(fullSize);
-	bzero(_gameScreenConverted, fullSize);
-
 	updateOutputSurface();
-
-	if (_overlayBuffer == NULL) {
-		printf("Overlay: (%u x %u)\n", _videoContext->overlayWidth, _videoContext->overlayHeight);
-		_overlayBuffer = new OverlayColor[_videoContext->overlayHeight * _videoContext->overlayWidth];
-	}
 
 	clearOverlay();
 
@@ -199,16 +184,19 @@ void OSystem_IPHONE::internUpdateScreen() {
 
 		//printf("Drawing: (%i, %i) -> (%i, %i)\n", dirtyRect.left, dirtyRect.top, dirtyRect.right, dirtyRect.bottom);
 		drawDirtyRect(dirtyRect);
-		updateHardwareSurfaceForRect(dirtyRect);
+		// TODO: Implement dirty rect code
+		//updateHardwareSurfaceForRect(dirtyRect);
 	}
 
 	if (_videoContext->overlayVisible) {
-		while (_dirtyOverlayRects.size()) {
+		// TODO: Implement dirty rect code
+		_dirtyOverlayRects.clear();
+		/*while (_dirtyOverlayRects.size()) {
 			Common::Rect dirtyRect = _dirtyOverlayRects.remove_at(_dirtyOverlayRects.size() - 1);
 
 			//printf("Drawing: (%i, %i) -> (%i, %i)\n", dirtyRect.left, dirtyRect.top, dirtyRect.right, dirtyRect.bottom);
 			drawDirtyOverlayRect(dirtyRect);
-		}
+		}*/
 	}
 }
 
@@ -216,23 +204,16 @@ void OSystem_IPHONE::drawDirtyRect(const Common::Rect &dirtyRect) {
 	int h = dirtyRect.bottom - dirtyRect.top;
 	int w = dirtyRect.right - dirtyRect.left;
 
-	byte  *src = &_gameScreenRaw[dirtyRect.top * _videoContext->screenWidth + dirtyRect.left];
-	uint16 *dst = &_gameScreenConverted[dirtyRect.top * _videoContext->screenWidth + dirtyRect.left];
+	byte *src = &_gameScreenRaw[dirtyRect.top * _videoContext->screenWidth + dirtyRect.left];
+	byte *dstRaw = (byte *)_videoContext->screenTexture.getBasePtr(dirtyRect.left, dirtyRect.top);
 	for (int y = h; y > 0; y--) {
+		uint16 *dst = (uint16 *)dstRaw;
 		for (int x = w; x > 0; x--)
 			*dst++ = _gamePalette[*src++];
 
-		dst += _videoContext->screenWidth - w;
+		dstRaw += _videoContext->screenTexture.pitch;
 		src += _videoContext->screenWidth - w;
 	}
-}
-
-void OSystem_IPHONE::drawDirtyOverlayRect(const Common::Rect &dirtyRect) {
-	iPhone_updateOverlayRect(_overlayBuffer, dirtyRect.left, dirtyRect.top, dirtyRect.right, dirtyRect.bottom, _videoContext->overlayWidth);
-}
-
-void OSystem_IPHONE::updateHardwareSurfaceForRect(const Common::Rect &updatedRect) {
-	iPhone_updateScreenRect(_gameScreenConverted, updatedRect.left, updatedRect.top, updatedRect.right, updatedRect.bottom, _videoContext->screenWidth);
 }
 
 Graphics::Surface *OSystem_IPHONE::lockScreen() {
@@ -265,6 +246,7 @@ void OSystem_IPHONE::showOverlay() {
 	_videoContext->overlayVisible = true;
 	dirtyFullOverlayScreen();
 	updateScreen();
+	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(updateMouseCursorScaling) withObject:nil waitUntilDone: YES];
 	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(clearColorBuffer) withObject:nil waitUntilDone: YES];
 }
 
@@ -273,23 +255,24 @@ void OSystem_IPHONE::hideOverlay() {
 	_videoContext->overlayVisible = false;
 	_dirtyOverlayRects.clear();
 	dirtyFullScreen();
+	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(updateMouseCursorScaling) withObject:nil waitUntilDone: YES];
 	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(clearColorBuffer) withObject:nil waitUntilDone: YES];
 }
 
 void OSystem_IPHONE::clearOverlay() {
 	//printf("clearOverlay()\n");
-	bzero(_overlayBuffer, _videoContext->overlayWidth * _videoContext->overlayHeight * sizeof(OverlayColor));
+	bzero(_videoContext->overlayTexture.getBasePtr(0, 0), _videoContext->overlayTexture.h * _videoContext->overlayTexture.pitch);
 	dirtyFullOverlayScreen();
 }
 
 void OSystem_IPHONE::grabOverlay(OverlayColor *buf, int pitch) {
 	//printf("grabOverlay()\n");
 	int h = _videoContext->overlayHeight;
-	OverlayColor *src = _overlayBuffer;
 
+	const byte *src = (const byte *)_videoContext->overlayTexture.getBasePtr(0, 0);
 	do {
 		memcpy(buf, src, _videoContext->overlayWidth * sizeof(OverlayColor));
-		src += _videoContext->overlayWidth;
+		src += _videoContext->overlayTexture.pitch;
 		buf += pitch;
 	} while (--h);
 }
@@ -323,16 +306,12 @@ void OSystem_IPHONE::copyRectToOverlay(const OverlayColor *buf, int pitch, int x
 		_dirtyOverlayRects.push_back(Common::Rect(x, y, x + w, y + h));
 	}
 
-	OverlayColor *dst = _overlayBuffer + (y * _videoContext->overlayWidth + x);
-	if ((int)_videoContext->overlayWidth == pitch && pitch == w)
-		memcpy(dst, buf, h * w * sizeof(OverlayColor));
-	else {
-		do {
-			memcpy(dst, buf, w * sizeof(OverlayColor));
-			buf += pitch;
-			dst += _videoContext->overlayWidth;
-		} while (--h);
-	}
+	byte *dst = (byte *)_videoContext->overlayTexture.getBasePtr(x, y);
+	do { 
+		memcpy(dst, buf, w * sizeof(OverlayColor));
+		buf += pitch;
+		dst += _videoContext->overlayTexture.pitch;
+	} while (--h);
 }
 
 int16 OSystem_IPHONE::getOverlayHeight() {
@@ -353,9 +332,9 @@ bool OSystem_IPHONE::showMouse(bool visible) {
 
 void OSystem_IPHONE::warpMouse(int x, int y) {
 	//printf("warpMouse()\n");
-
 	_videoContext->mouseX = x;
 	_videoContext->mouseY = y;
+	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(notifyMouseMove) withObject:nil waitUntilDone: YES];
 	_mouseDirty = true;
 }
 
@@ -415,11 +394,12 @@ void OSystem_IPHONE::setCursorPalette(const byte *colors, uint start, uint num) 
 }
 
 void OSystem_IPHONE::updateMouseTexture() {
-	int texWidth = getSizeNextPOT(_videoContext->mouseWidth);
-	int texHeight = getSizeNextPOT(_videoContext->mouseHeight);
-	int bufferSize = texWidth * texHeight * sizeof(int16);
-	uint16 *mouseBuf = (uint16 *)malloc(bufferSize);
-	memset(mouseBuf, 0, bufferSize);
+	uint texWidth = getSizeNextPOT(_videoContext->mouseWidth);
+	uint texHeight = getSizeNextPOT(_videoContext->mouseHeight);
+
+	Graphics::Surface &mouseTexture = _videoContext->mouseTexture;
+	if (mouseTexture.w != texWidth || mouseTexture.h != texHeight)
+		mouseTexture.create(texWidth, texHeight, Graphics::createPixelFormat<5551>());
 
 	const uint16 *palette;
 	if (_mouseCursorPaletteEnabled)
@@ -427,6 +407,7 @@ void OSystem_IPHONE::updateMouseTexture() {
 	else
 		palette = _gamePaletteRGBA5551;
 
+	uint16 *mouseBuf = (uint16 *)mouseTexture.getBasePtr(0, 0);
 	for (uint x = 0; x < _videoContext->mouseWidth; ++x) {
 		for (uint y = 0; y < _videoContext->mouseHeight; ++y) {
 			const byte color = _mouseBuf[y * _videoContext->mouseWidth + x];
@@ -437,5 +418,5 @@ void OSystem_IPHONE::updateMouseTexture() {
 		}
 	}
 
-	iPhone_setMouseCursor(mouseBuf);
+	[g_iPhoneViewInstance performSelectorOnMainThread:@selector(updateMouseCursor) withObject:nil waitUntilDone: YES];
 }
