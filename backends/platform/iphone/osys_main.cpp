@@ -55,13 +55,12 @@ SoundProc OSystem_IPHONE::s_soundCallback = NULL;
 void *OSystem_IPHONE::s_soundParam = NULL;
 
 OSystem_IPHONE::OSystem_IPHONE() :
-	_mixer(NULL), _gameScreenRaw(NULL),
-	_mouseBuf(NULL), _lastMouseTap(0), _queuedEventTime(0),
+	_mixer(NULL), _lastMouseTap(0), _queuedEventTime(0),
 	_mouseNeedTextureUpdate(false), _secondaryTapped(false), _lastSecondaryTap(0),
 	_screenOrientation(kScreenOrientationFlippedLandscape), _mouseClickAndDragEnabled(false),
 	_gestureStartX(-1), _gestureStartY(-1), _fullScreenIsDirty(false), _fullScreenOverlayIsDirty(false),
 	_mouseDirty(false), _timeSuspended(0), _lastDragPosX(-1), _lastDragPosY(-1), _screenChangeCount(0),
-	_mouseCursorPaletteEnabled(false) {
+	_mouseCursorPaletteEnabled(false), _gfxTransactionError(kTransactionSuccess) {
 	_queuedInputEvent.type = Common::EVENT_INVALID;
 	_touchpadModeEnabled = !iPhone_isHighResDevice();
 	_fsFactory = new POSIXFilesystemFactory();
@@ -72,7 +71,12 @@ OSystem_IPHONE::~OSystem_IPHONE() {
 	AudioQueueDispose(s_AudioQueue.queue, true);
 
 	delete _mixer;
-	free(_gameScreenRaw);
+	// Prevent accidental freeing of the screen texture here. This needs to be
+	// checked since we might use the screen texture as framebuffer in the case
+	// of hi-color games for example.
+	if (_framebuffer.pixels == _videoContext->screenTexture.pixels)
+		_framebuffer.free();
+	_mouseBuffer.free();
 }
 
 int OSystem_IPHONE::timerHandler(int t) {

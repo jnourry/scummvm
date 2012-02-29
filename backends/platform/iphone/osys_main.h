@@ -64,7 +64,9 @@ protected:
 	VideoContext *_videoContext;
 
 	Graphics::Surface _framebuffer;
-	byte *_gameScreenRaw;
+
+	// For signaling that screen format set up might have failed.
+	TransactionError _gfxTransactionError;
 
 	// For use with the game texture
 	uint16  _gamePalette[256];
@@ -76,10 +78,11 @@ protected:
 
 	bool _mouseCursorPaletteEnabled;
 	uint16 _mouseCursorPalette[256];
-	byte *_mouseBuf;
-	byte _mouseKeyColor;
+	Graphics::Surface _mouseBuffer;
+	uint16 _mouseKeyColor;
 	bool _mouseDirty;
 	bool _mouseNeedTextureUpdate;
+
 	long _lastMouseDown;
 	long _lastMouseTap;
 	long _queuedEventTime;
@@ -121,8 +124,17 @@ public:
 	virtual bool setGraphicsMode(int mode);
 	virtual int getGraphicsMode() const;
 	virtual void initSize(uint width, uint height, const Graphics::PixelFormat *format);
+
+	virtual void beginGFXTransaction();
+	virtual TransactionError endGFXTransaction();
+
 	virtual int16 getHeight();
 	virtual int16 getWidth();
+
+#ifdef USE_RGB_COLOR
+	virtual Graphics::PixelFormat getScreenFormat() const { return _framebuffer.format; }
+	virtual Common::List<Graphics::PixelFormat> getSupportedFormats() const;
+#endif
 
 	virtual PaletteManager *getPaletteManager() { return this; }
 protected:
